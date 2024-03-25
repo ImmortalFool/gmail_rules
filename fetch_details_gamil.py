@@ -40,7 +40,6 @@ def connect_gmail():
         service = build("gmail", "v1", credentials=creds)
         return service
     except HttpError as error:
-        # TODO(developer) - Handle errors from gmail API.
         return f"An error occurred: {error}"
 
 

@@ -1,6 +1,16 @@
+import json
+
 from mysql.connector import connect, Error
 
+# Open the JSON file
+with open('config.json', 'r') as file:
+    # Load the JSON data
+    data = json.load(file)
+
+USERNAME = data['username']
+PASSWORD = data['password']
 DB_NAME = "HAPPYFOX"
+
 
 def check_database(cursor):
     try:
@@ -15,7 +25,7 @@ def check_database(cursor):
     except Error as e:
         print(f"An error occurred while checking/creating the database: {e}")
 
-def create_tables(cursor):
+def create_messages_table(cursor):
     try:
         # Create messages table
         cursor.execute("""
@@ -29,7 +39,12 @@ def create_tables(cursor):
                 folders VARCHAR(255)
             )
         """)
+        print("Tables created successfully.")
+    except Error as e:
+        print(f"An error occurred while creating tables: {e}")
 
+def create_labels_table(cursor):
+    try:
         # Create labels table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS labels (
@@ -44,11 +59,7 @@ def create_tables(cursor):
 def database_connection():
     try:
         # Connect to MySQL
-        connection = connect(host="localhost", user="root", password="admin")
-        cursor = connection.cursor()
-        check_database(cursor)
-        cursor.execute(f"USE {DB_NAME}")
-        create_tables(cursor)
+        connection = connect(host="localhost", user=USERNAME, password=PASSWORD)
         return connection
 
     except Error as e:
@@ -57,37 +68,45 @@ def database_connection():
 
 
 def insert_into_messages(messages):
-    # try:
-    # Connect to MySQL
-    connection = database_connection()
-    cursor = connection.cursor()
+    try:
+        # Connect to MySQL
+        connection = database_connection()
+        cursor = connection.cursor()
 
-    # Define the SQL query for inserting messages
-    insert_messages_query = """
-    INSERT INTO messages
-    (email_id, sender, subject, date, is_read, folders)
-    VALUES (%s, %s, %s, %s, %s, %s)
-    """
+        check_database(cursor)
+        cursor.execute(f"USE {DB_NAME}")
+        create_messages_table(cursor)
 
-    # Execute the query for each message in the list
-    cursor.executemany(insert_messages_query, messages)
-    connection.commit()
-    print("Messages inserted successfully into 'messages' table.")
+        # Define the SQL query for inserting messages
+        insert_messages_query = """
+        INSERT INTO messages
+        (email_id, sender, subject, date, is_read, folders)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
 
-    # except Error as error:
-    #     print("Failed to insert messages into 'messages' table:", error)
-    #
-    # finally:
-    #     # Close cursor and connection
-    #     if connection.is_connected():
-    #         cursor.close()
-    connection.close()
+        # Execute the query for each message in the list
+        cursor.executemany(insert_messages_query, messages)
+        connection.commit()
+        print("Messages inserted successfully into 'messages' table.")
+
+    except Error as error:
+        print("Failed to insert messages into 'messages' table:", error)
+
+    finally:
+        # Close cursor and connection
+        if connection.is_connected():
+            cursor.close()
+        connection.close()
 
 def insert_into_labels(labels):
     try:
         # Connect to MySQL
         connection = database_connection()
         cursor = connection.cursor()
+
+        check_database(cursor)
+        cursor.execute(f"USE {DB_NAME}")
+        create_labels_table(cursor)
 
         # Get list of label names
         label_names = list(labels.keys())
@@ -113,3 +132,66 @@ def insert_into_labels(labels):
         if connection.is_connected():
             cursor.close()
             connection.close()
+
+
+def fetch_messages(sql_query):
+    try:
+        # Connect to MySQL
+        connection = database_connection()
+        cursor = connection.cursor()
+        cursor.execute(f"USE {DB_NAME}")
+
+        cursor.execute(sql_query)
+        messages = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+        return messages
+    except Error as error:
+        print("Error while connecting to MySQL", error)
+        return None
+
+def fetch_labels():
+    try:
+        # Connect to MySQL
+        connection = database_connection()
+        cursor = connection.cursor()
+        cursor.execute(f"USE {DB_NAME}")
+
+        cursor.execute("SELECT label FROM labels")
+        label = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+        return label
+    except Error as error:
+        print("Error while connecting to MySQL", error)
+        return None
+
+
+def generate_sql_query(rules):
+    sql_query = "SELECT * FROM messages WHERE "
+    if rules[0]['rules'] == "all":
+        clause = "AND"
+    elif rules[0]['rules'] == "any":
+        clasue = "OR"
+    conds = []
+    for i in range(0, len(rules)):
+        print(rules[i])
+        if rules[i]['predicate'] == "contains":
+            conds.append(f"{rules[i]['field']} LIKE '%{rules[i]['value1']}%'")
+        elif rules[i]['predicate'] == "does_not_contain":
+            conds.append(f"{rules[i]['field']} NOT LIKE '%{rules[i]['value1']}%'")
+        elif rules[i]['predicate'] == "equals":
+            conds.append(f"{rules[i]['field']} = '{rules[i]['value1']}'")
+        elif rules[i]['predicate'] == "does_not_equals":
+            conds.append(f"{rules[i]['field']} != '{rules[i]['value1']}'")
+        elif rules[i]['predicate'] == "less_than":
+            conds.append(f"date < DATE_SUB(CURDATE(), INTERVAL {rules[i]['value1']} DAY)'")
+        elif rules[i]['predicate'] == "greater_than":
+            conds.append(f"date > DATE_SUB(CURDATE(), INTERVAL {rules[i]['value1']} DAY)'")
+    condition = str(f" {clause} ".join(conds))
+
+    sql_query = sql_query + condition
+    print(sql_query)
+    return sql_query
